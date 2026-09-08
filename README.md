@@ -72,6 +72,14 @@ npx alphapilot stop
 **AI 层(可选)**:`LLM_PROVIDER`(zhipu/openai/deepseek/groq/ollama)+
 `LLM_API_KEY`。不填则纯机械规则运行,`explain` 命令提示需要 key。
 
+## 网页工作台
+
+```bash
+npm run workbench   # 打开 http://localhost:3210
+```
+
+浏览器看盘 + 结构化分析工作台：lightweight-charts 蜡烛图(MA7/25/99、S/R 价格线、斐波那契 0.618)、确定性规则引擎输出「趋势结构 / 多周期共振 / ATR 聚类支撑压力 / 摆动点自动斐波那契 / 观察计划(观察区·突破口·作废位·目标)」。LLM 仅基于规则数据撰写中文观察报告,不编造任何价位;右侧实时显示 Agent 账本与最近决策,支持一键急停。图表库已本地化分发(离线可用),页面自带渲染自检 beacon。
+
 ## 实测结果(测试网真实数据,2026-09-08)
 
 | 回测 | 窗口 | 收益 | 笔数 | 胜率 | 最大回撤 |
