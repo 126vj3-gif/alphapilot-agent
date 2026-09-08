@@ -1,0 +1,32 @@
+{
+  "name": "alphapilot-agent",
+  "version": "1.0.0",
+  "description": "AlphaPilot — a strategy-execution AI agent built on Binance Agent OS primitives (Binance APIs, Skills Hub skill format, binance-cli compatible)",
+  "type": "module",
+  "bin": {
+    "alphapilot": "./bin/alphapilot.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node bin/alphapilot.js run",
+    "once": "node bin/alphapilot.js once",
+    "backtest": "node bin/alphapilot.js backtest --symbol BTCUSDT --interval 1h --days 90",
+    "status": "node bin/alphapilot.js status"
+  },
+  "keywords": [
+    "binance",
+    "agent-os",
+    "ai-agent",
+    "trading-agent",
+    "mcp",
+    "skills-hub",
+    "strategy"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@binance/binance-cli": "^1.3.0",
+    "@binance/spot": "^31.0.3"
+  }
+}
