@@ -13,7 +13,7 @@
 const PROVIDERS = {
   openai: { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
   zhipu: { url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model: 'glm-4-flash' },
-  deepseek: { url: 'https://api.deepseek.com/chat/completions', model: 'deepseek-chat' },
+  deepseek: { url: 'https://api.deepseek.com/v1/chat/completions', model: 'deepseek-chat' },
   groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.1-8b-instant' },
   ollama: { url: 'http://localhost:11434/v1/chat/completions', model: 'lama3' },
 };
