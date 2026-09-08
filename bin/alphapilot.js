@@ -71,6 +71,22 @@ async function main() {
       break;
     }
 
+    case 'explain': {
+      // Natural-language market brief from the LLM analyst layer.
+      const agent = new AlphaPilot(cfg);
+      if (!agent.analyst.enabled) {
+        console.error('LLM analyst disabled — set LLM_API_KEY (and optionally LLM_PROVIDER) in .env');
+        process.exit(1);
+      }
+      const candles = await agent.market.klines(cfg.symbol, cfg.interval, 200);
+      const signal = agent.strategy.evaluate(candles);
+      console.log(`\nAlphaPilot · ${cfg.symbol} ${cfg.interval} · LLM=${cfg.llm.provider}${cfg.llm.model ? '/' + cfg.llm.model : ''}\n`);
+      const brief = await agent.analyst.explain(candles, signal);
+      console.log(brief ?? '(no output)');
+      console.log(`\nmechanical signal for reference: ${signal.action} (${signal.confidence}) — ${signal.reason}\n`);
+      break;
+    }
+
     case 'status': {
       const store = new StateStore(cfg.stateDir);
       const state = store.load();
@@ -87,6 +103,12 @@ async function main() {
       if (closed.length) {
         const pnl = closed.reduce((a, t) => a + (t.pnl ?? 0), 0);
         console.log(`  closed trades: ${closed.length}   net pnl: ${fmt(pnl)} USDT`);
+      }
+      const llmReviews = state.journal.filter((j) => j.type === 'LLM_REVIEW');
+      if (llmReviews.length) {
+        const vetoes = llmReviews.filter((j) => j.decision === 'VETO').length;
+        const downsizes = llmReviews.filter((j) => j.decision === 'DOWNSIZE').length;
+        console.log(`  LLM analyst: ${llmReviews.length} reviews   vetoes: ${vetoes}   downsizes: ${downsizes}`);
       }
       console.log('');
       break;
@@ -107,11 +129,12 @@ async function main() {
 Usage: alphapilot <command> [options]
 
 Commands:
-  once        Run a single observe → signal → risk → execute cycle
+  once        Run a single observe → signal → LLM review → risk → execute cycle
   run         Continuous loop (poll every POLL_INTERVAL_MS, default 60s)
+  explain     Natural-language market brief from the LLM analyst layer
   backtest    Replay history through the same strategy+risk code
               options: --symbol BTCUSDT --interval 1h --days 90 --strategy ensemble
-  status      Show ledger, open position, and daily counters
+  status      Show ledger, open position, LLM stats, and daily counters
   stop        Arm the kill switch (agent refuses new orders)
 
 Options:
@@ -120,6 +143,11 @@ Options:
 Safety:
   DRY_RUN=true (default) simulates orders; set DRY_RUN=false to trade for real.
   Keys need SPOT trading permission only. There is no withdrawal path in this code.
+
+AI layer (optional):
+  LLM_PROVIDER=zhipu|openai|deepseek|groq|ollama   LLM_API_KEY=...   LLM_MODEL=...
+  Without a key the agent runs purely mechanical rules — no feature is lost
+  beyond the second opinion itself.
 `);
   }
 }

@@ -1,11 +1,12 @@
 # AlphaPilot — Strategy-Execution Agent on Binance Agent OS
 
 > Binance Agent OS Mini Hackathon · Track A ("搭 Agent" / Build an AI Agent)
-> 一个把「策略信号 → 风控 → 执行 → 审计」做成完整闭环的现货策略执行 Agent。
+> 一个把「策略信号 → LLM 分析师 → 风控 → 执行 → 审计」做成完整闭环的现货策略执行 AI Agent。
 
-AlphaPilot 是一个用 Binance Agent OS 官方原语构建的**策略执行 Agent**:它观察行情、
-产生交易信号、通过多层风控闸门、以 dry-run 或真实模式执行订单,并把每一个决策
-落盘成人类可读的审计日志。内置回测引擎,回测与实盘跑的是**同一份**策略与风控代码。
+AlphaPilot 是一个用 Binance Agent OS 官方原语构建的**策略执行 AI Agent**:机械策略产生信号后,
+由 **LLM 分析师层做第二意见裁决**(批准 / 否决 / 降仓位),再经多层风控闸门,以 dry-run 或
+真实模式执行订单,并把每一个决策——包括 AI 的自然语言推理——落盘成人类可读的审计日志。
+内置回测引擎,回测与实盘跑的是**同一份**策略与风控代码。
 
 ## 为什么这算"用上了 Agent OS"
 
@@ -19,17 +20,17 @@ AlphaPilot 是一个用 Binance Agent OS 官方原语构建的**策略执行 Age
 ## 架构
 
 ```
-            ┌────────────────────────────────────────────────┐
-            │                  AlphaPilot                     │
-            │                                                │
- klines ──▶ │  Market ──▶ Strategy ──▶ Risk ──▶ Executor     │
- (spot SDK) │  (observe)  (ensemble   (gate)   (dry-run /    │
-            │              votes)             live MARKET)   │
-            │      │           │          │         │        │
-            │      └───────────┴────┬─────┴─────────┘        │
-            │                  StateStore                    │
-            │        (JSON ledger: trades + journal)         │
-            └────────────────────────────────────────────────┘
+            ┌──────────────────────────────────────────────────────────┐
+            │                        AlphaPilot                         │
+            │                                                          │
+ klines ──▶ │  Market ──▶ Strategy ──▶ LLM ──▶ Risk ──▶ Executor       │
+ (spot SDK) │  (observe)  (ensemble   analyst  (gate)   (dry-run /     │
+            │              votes)     (2nd op)          live MARKET)   │
+            │      │           │         │        │         │          │
+            │      └───────────┴────┬────┴────────┴─────────┘          │
+            │                  StateStore                              │
+            │     (JSON ledger: trades + NL decision journal)          │
+            └──────────────────────────────────────────────────────────┘
 ```
 
 一次决策循环(`alphapilot once`):
@@ -37,8 +38,11 @@ AlphaPilot 是一个用 Binance Agent OS 官方原语构建的**策略执行 Age
 1. **观察** — 拉取 symbol/interval 的 K线
 2. **先管出场** — 持仓先过止损/止盈,再考虑新进场
 3. **信号** — SMA 交叉(趋势)+ RSI 极值回归(震荡)投票,得分 ≥ 0.5 且无反对票才出手
-4. **风控闸门** — 仓位 = 权益 × 比例 × 置信度;日亏损上限、日笔数上限、单币种冷却、最小名义额、kill switch
-5. **执行** — dry-run 按实时价模拟成交(默认),或 `@binance/spot` 真实 MARKET 单
+4. **LLM 分析师** — 提议进场时,大模型收到行情上下文 + 双策略投票明细,输出
+   `APPROVE / VETO / DOWNSIZE` 裁决与自然语言理由;被否决的交易直接拦截,
+   被降仓的交易按调整后的置信度缩量。**无 API key 时自动降级为纯机械规则,零功能损失**
+5. **风控闸门** — 仓位 = 权益 × 比例 × 置信度;日亏损上限、日笔数上限、单币种冷却、最小名义额、kill switch
+6. **执行** — dry-run 按实时价模拟成交(默认),或 `@binance/spot` 真实 MARKET 单
 
 ## 快速开始
 
@@ -48,19 +52,25 @@ npm install
 # 单次决策(默认 DRY-RUN + testnet,无需任何 API key)
 npx alphapilot once
 
+# AI 市场简报(需配 LLM_API_KEY,支持智谱/OpenAI/DeepSeek/Groq/Ollama)
+npx alphapilot explain
+
 # 30 天回测(真实历史K线)
 npx alphapilot backtest --symbol BTCUSDT --interval 1h --days 30
 
 # 持续运行(默认 60s 一轮)
 npx alphapilot run
 
-# 查看账本 / 紧急停止
+# 查看账本(含 LLM 裁决统计)/ 紧急停止
 npx alphapilot status
 npx alphapilot stop
 ```
 
 **实盘(可选)**:复制 `.env.example` → `.env`,填入仅有现货交易权限的 API key
 (务必关闭提币权限),设 `DRY_RUN=false`。`BINANCE_API_ENV=prod` 切主网。
+
+**AI 层(可选)**:`LLM_PROVIDER`(zhipu/openai/deepseek/groq/ollama)+
+`LLM_API_KEY`。不填则纯机械规则运行,`explain` 命令提示需要 key。
 
 ## 实测结果(测试网真实数据,2026-09-08)
 
@@ -69,7 +79,9 @@ npx alphapilot stop
 | BTCUSDT 1h × 30d | 650 根K线 | +0.19% | 12 | 66.7% | 0.33% |
 | ETHUSDT 1h × 30d | 650 根K线 | +0.24% | 4 | 50% | 0.21% |
 
-仓位上限 10% × 置信度缩放,故绝对收益温和、回撤极小——风控优先于收益,这是设计选择。
+LLM 分析师层验证:APPROVE / DOWNSIZE / VETO 三分支、置信度调整、自然语言决策日志、
+`explain` 简报全链路通过(OpenAI 兼容协议)。仓位上限 10% × 置信度缩放,
+故绝对收益温和、回撤极小——风控优先于收益,这是设计选择。
 
 ## 安全设计
 
@@ -82,10 +94,11 @@ npx alphapilot stop
 ## 项目结构
 
 ```
-bin/alphapilot.js          CLI 入口(once / run / backtest / status / stop)
+bin/alphapilot.js          CLI 入口(once / run / explain / backtest / status / stop)
 src/config.js              .env + 环境变量 → 运行配置
 src/market.js              行情层(@binance/spot: klines / ticker / account)
 src/strategies/            策略层:sma-cross、rsi-reversion、ensemble
+src/llm.js                 LLM 分析师层(OpenAI 兼容多提供商,VETO/DOWNSIZE 裁决)
 src/risk.js                风控闸门与仓位管理
 src/executor.js            执行层(dry-run 模拟 / 真实 MARKET 单)
 src/agent.js               Agent 主循环

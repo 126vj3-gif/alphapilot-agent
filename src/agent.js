@@ -3,14 +3,17 @@ import { Executor } from './executor.js';
 import { RiskManager } from './risk.js';
 import { StateStore } from './state.js';
 import { getStrategy } from './strategies/index.js';
+import { LLMAnalyst } from './llm.js';
 
 /**
  * AlphaPilot agent core — a single decision cycle:
  *
- *   market data → strategy signal → risk gate → execution → journal
+ *   market data → strategy signal → LLM analyst → risk gate → execution → journal
  *
- * The loop is intentionally readable: every step appends to the on-disk
- * journal so the agent's behaviour is fully auditable after the fact.
+ * The LLM analyst is the second opinion layer: it reviews any proposed entry,
+ * can veto or downsize it, and its reasoning is journaled verbatim. Without an
+ * LLM_API_KEY the pipeline degrades to the pure mechanical rules — every step
+ * remains auditable either way.
  */
 export class AlphaPilot {
   constructor(cfg) {
@@ -20,6 +23,7 @@ export class AlphaPilot {
     this.risk = new RiskManager(cfg);
     this.store = new StateStore(cfg.stateDir);
     this.strategy = getStrategy(cfg.strategy);
+    this.analyst = new LLMAnalyst(cfg);
   }
 
   /** Mark-to-market equity of the local ledger. */
@@ -66,11 +70,31 @@ export class AlphaPilot {
     const signal = this.strategy.evaluate(candles);
     log('SIGNAL', { strategy: this.strategy.id, action: signal.action, confidence: Number((signal.confidence ?? 0).toFixed(3)), reason: signal.reason });
 
+    // 3.5 ─ LLM analyst: second opinion on proposed entries
+    let llmReview = null;
+    if (signal.action === 'BUY' && !state.position && this.analyst.enabled) {
+      llmReview = await this.analyst.review(candles, signal, state.position);
+      if (llmReview) {
+        log('LLM_REVIEW', {
+          provider: llmReview.provider,
+          model: llmReview.model,
+          decision: llmReview.decision,
+          reason: llmReview.reason,
+          degraded: llmReview.degraded === true,
+        });
+        if (llmReview.decision === 'VETO') {
+          log('RISK_BLOCK', { wanted: 'BUY', reason: `LLM analyst veto: ${llmReview.reason}` });
+        } else if (llmReview.decision === 'DOWNSIZE') {
+          signal.confidence = Math.max(0, (signal.confidence ?? 0) + llmReview.confidenceAdjustment);
+        }
+      }
+    }
+
     // 4 ─ Act on the signal (spot: long-only — SELL means "exit the long")
     let acted = null;
     if (signal.action === 'SELL' && state.position) {
       acted = await this.#closePosition(state, price, 'EXIT_SIGNAL', log);
-    } else if (signal.action === 'BUY' && !state.position) {
+    } else if (signal.action === 'BUY' && !state.position && llmReview?.decision !== 'VETO') {
       const gate = this.risk.checkOrder({
         action: 'BUY',
         symbol: this.cfg.symbol,

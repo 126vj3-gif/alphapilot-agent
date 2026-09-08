@@ -1,17 +1,18 @@
 ---
 name: alphapilot
 description: |
-  AlphaPilot — a self-contained strategy-execution agent for Binance spot markets.
-  observe market → generate signals (SMA cross + RSI reversion ensemble) → risk gate
+  AlphaPilot — a self-contained strategy-execution AI agent for Binance spot markets.
+  observe market → generate signals (SMA cross + RSI reversion ensemble) → LLM analyst
+  second opinion (approve / veto / downsize with natural-language reasoning) → risk gate
   (position sizing, daily loss limit, cooldown, kill switch) → execute (dry-run or live
   MARKET orders) → journal every decision to disk. Includes a backtester that replays
   history through the exact same strategy and risk code used live. Trigger whenever the
   user wants to run, backtest, or inspect an automated trading strategy on Binance —
-  phrases like "run my strategy", "backtest BTCUSDT", "how is the agent doing", or
-  "stop trading".
+  phrases like "run my strategy", "backtest BTCUSDT", "explain the market",
+  "how is the agent doing", or "stop trading".
 metadata:
   author: alphapilot
-  version: "1.0"
+  version: "1.1"
 ---
 
 # AlphaPilot — Strategy Execution Agent
@@ -25,10 +26,11 @@ binance-cli-compatible configuration surface (same env vars: `BINANCE_API_KEY`,
 
 | User intent | Command |
 |-------------|---------|
-| Run one decision cycle (observe → signal → risk → execute) | `npx alphapilot once` |
+| Run one decision cycle (observe → signal → LLM review → risk → execute) | `npx alphapilot once` |
 | Start the continuous loop | `npx alphapilot run` |
+| Natural-language market brief from the LLM analyst | `npx alphapilot explain` |
 | Backtest a symbol/interval | `npx alphapilot backtest --symbol BTCUSDT --interval 1h --days 90` |
-| Show ledger, position, daily counters | `npx alphapilot status` |
+| Show ledger, position, LLM stats, daily counters | `npx alphapilot status` |
 | Arm the kill switch | `npx alphapilot stop` |
 
 ## Prerequisites
@@ -38,6 +40,9 @@ binance-cli-compatible configuration surface (same env vars: `BINANCE_API_KEY`,
 - For live trading only: Binance API key with **SPOT trading permission, no
   withdrawal permission**. Dry-run (default) and backtest need no credentials at
   all — public market data endpoints suffice.
+- Optional AI layer: `LLM_PROVIDER` + `LLM_API_KEY` (any OpenAI-compatible provider:
+  zhipu / openai / deepseek / groq / ollama). Without a key the agent runs purely
+  mechanical rules — only the second opinion is skipped.
 
 ## Behaviour Model
 
@@ -49,9 +54,13 @@ Every cycle runs the same pipeline, and every step appends to
    before any new entry is considered.
 3. **Signal** — ensemble of two strategies votes; a trade needs score ≥ 0.5 and no
    dissenting vote.
-4. **Risk gate** — sizing (fraction of equity × confidence), daily loss limit,
+4. **LLM analyst** — on a proposed entry, the LLM receives market context and vote
+   details, and answers with a JSON verdict: APPROVE, VETO (blocks the entry), or
+   DOWNSIZE (scales confidence down → smaller position). Its reasoning is journaled
+   verbatim. Errors degrade gracefully to the mechanical signal.
+5. **Risk gate** — sizing (fraction of equity × confidence), daily loss limit,
    trade cap, per-symbol cooldown, minimum notional, kill switch.
-5. **Execute** — dry-run fills at live market price (default) or real MARKET orders
+6. **Execute** — dry-run fills at live market price (default) or real MARKET orders
    via `@binance/spot`.
 
 ## Configuration

@@ -48,6 +48,7 @@ function riskFromEnv() {
 
 export function loadConfig(overrides = {}) {
   const apiEnv = (overrides.apiEnv || env.BINANCE_API_ENV || 'testnet').toLowerCase();
+  const llmProvider = (env.LLM_PROVIDER || 'zhipu').toLowerCase();
   const cfg = {
     symbol: overrides.symbol || env.SYMBOL || 'BTCUSDT',
     interval: overrides.interval || env.INTERVAL || '1h',
@@ -63,6 +64,11 @@ export function loadConfig(overrides = {}) {
     apiSecret: env.BINANCE_SECRET_KEY || '',
     risk: overrides.risk || riskFromEnv(),
     stateDir: join(ROOT, 'state'),
+    llm: {
+      provider: llmProvider,
+      model: env.LLM_MODEL || '',
+      apiKey: env.LLM_API_KEY || '',
+    },
   };
   return cfg;
 }
