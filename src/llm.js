@@ -157,6 +157,37 @@ export class LLMAnalyst {
     const data = await res.json();
     return data.choices?.[0]?.message?.content?.trim() ?? null;
   }
+
+  /** Generic OpenAI-compatible completion used by the workbench report. */
+  async complete(system, user, { temperature = 0.3, maxTokens = 600 } = {}) {
+    if (!this.enabled) return null;
+    const provider = PROVIDERS[this.providerName];
+    if (!provider) return null;
+    const body = {
+      model: this.cfg.llm.model || provider.model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      temperature,
+      max_tokens: maxTokens,
+    };
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30_000);
+    try {
+      const res = await fetch(provider.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.cfg.llm.apiKey}` },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`LLM HTTP ${res.status}`);
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content?.trim() ?? null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }
 
 export const llmProviders = Object.keys(PROVIDERS);

@@ -13,7 +13,8 @@
     "start": "node bin/alphapilot.js run",
     "once": "node bin/alphapilot.js once",
     "backtest": "node bin/alphapilot.js backtest --symbol BTCUSDT --interval 1h --days 90",
-    "status": "node bin/alphapilot.js status"
+    "status": "node bin/alphapilot.js status",
+    "workbench": "node workbench/server.mjs"
   },
   "keywords": [
     "binance",

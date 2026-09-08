@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AlphaPilot Workbench · Binance Agent OS</title>
+<script>
+  // bootstrap: global error reporting — must load before everything else
+  window.__wb = (obj) => { try { return fetch('/api/beacon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: Date.now(), ...obj }) }); } catch {} };
+  window.addEventListener('error', (e) => __wb({ pageError: e.message, line: e.lineno, src: (e.filename || '').slice(-40) }));
+  window.addEventListener('unhandledrejection', (e) => __wb({ promiseError: String(e.reason).slice(0, 200) }));
+</script>
+<script src="/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0e14; color: #d7dce4; font: 13px/1.55 "Cascadia Code", Consolas, "Microsoft YaHei", monospace; }
+  header { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid #1c2230; background: #0d1119; position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 15px; margin: 0; color: #f0b90b; letter-spacing: .5px; }
+  header .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid #2a3245; color: #8b96ab; }
+  header .badge.ok { color: #34d399; border-color: #14532d; }
+  header .badge.warn { color: #fbbf24; border-color: #78350f; }
+  select, button { background: #161b28; color: #d7dce4; border: 1px solid #2a3245; border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+  button.primary { background: #f0b90b; color: #111; border: none; font-weight: bold; }
+  button.danger { background: #3b1113; color: #f87171; border-color: #7f1d1d; }
+  main { display: grid; grid-template-columns: 1fr 380px; gap: 12px; padding: 12px 16px; }
+  #chart { height: 560px; border: 1px solid #1c2230; border-radius: 8px; }
+  .panel { border: 1px solid #1c2230; border-radius: 8px; background: #0d1119; padding: 12px 14px; margin-bottom: 12px; }
+  .panel h2 { font-size: 12px; margin: 0 0 8px; color: #f0b90b; text-transform: uppercase; letter-spacing: 1px; }
+  .kv { display: flex; justify-content: space-between; margin: 3px 0; }
+  .kv b { color: #e8edf5; font-weight: normal; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td, th { padding: 3px 6px; text-align: right; border-bottom: 1px solid #161c2a; }
+  th { color: #8b96ab; font-weight: normal; text-align: right; }
+  .up { color: #34d399; } .down { color: #f87171; } .neutral { color: #fbbf24; }
+  #report { white-space: pre-wrap; color: #cdd6e4; }
+  #journal div { border-bottom: 1px dashed #161c2a; padding: 4px 0; color: #8b96ab; font-size: 12px; }
+  .disclaimer { padding: 4px 16px 14px; color: #556; font-size: 11px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 8px; font-size: 11px; margin-right: 6px; }
+  .pill.long { background: #0f2e22; color: #34d399; } .pill.short { background: #331416; color: #f87171; } .pill.flat { background: #332a10; color: #fbbf24; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AlphaPilot Workbench</h1>
+  <select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option></select>
+  <select id="interval"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
+  <button id="analyzeBtn" class="primary">生成分析</button>
+  <button id="reportBtn">AI 报告</button>
+  <span class="badge" id="srcBadge">loading…</span>
+  <span class="badge" id="agentBadge">agent…</span>
+  <button id="stopBtn" class="danger" style="margin-left:auto">急停 Kill Switch</button>
+</header>
+<main>
+  <section>
+    <div id="chart"></div>
+    <div class="panel">
+      <h2>观察计划（规则生成，不由模型编造）</h2>
+      <div id="plan">—</div>
+    </div>
+  </section>
+  <aside>
+    <div class="panel"><h2>趋势结构</h2><div id="structure">—</div></div>
+    <div class="panel"><h2>多周期共振</h2><div id="mtf">—</div></div>
+    <div class="panel"><h2>支撑 / 压力（ATR 聚类）</h2><div id="sr">—</div></div>
+    <div class="panel"><h2>斐波那契（摆动点自动锚定）</h2><div id="fib">—</div></div>
+    <div class="panel"><h2>AI 分析师报告</h2><div id="report">点击「AI 报告」生成</div></div>
+    <div class="panel"><h2>Agent 账本（最近决策）</h2><div id="journal">—</div></div>
+  </aside>
+</main>
+<div class="disclaimer">AlphaPilot · Binance Agent OS 迷你黑客松赛道一 · 数据来自币安测试网公开行情 · DRY-RUN 演示，不构成投资建议，所有价位由确定性规则计算，LLM 仅负责叙述</div>
+<script>
+const { createChart, ColorType } = LightweightCharts;
+const $ = (id) => document.getElementById(id);
+const chart = createChart($('chart'), {
+  layout: { background: { type: ColorType.Solid, color: '#0b0e14' }, textColor: '#8b96ab' },
+  grid: { vertLines: { color: '#131826' }, horzLines: { color: '#131826' } },
+  timeScale: { timeVisible: true, borderColor: '#1c2230' },
+  rightPriceScale: { borderColor: '#1c2230' },
+});
+const candles = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
+const maSeries = {
+  ma7: chart.addLineSeries({ color: '#f0b90b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
+  ma25: chart.addLineSeries({ color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
+  ma99: chart.addLineSeries({ color: '#c084fc', lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
+};
+let priceLines = [];
+
+function sma(vals, p) { const out = []; let s = 0; for (let i = 0; i < vals.length; i++) { s += vals[i]; if (i >= p) s -= vals[i - p]; if (i >= p - 1) out.push({ time: null, v: s / p }); else out.push({ time: null, v: null }); } return out; }
+
+async function load() {
+  const symbol = $('symbol').value, interval = $('interval').value;
+  $('srcBadge').textContent = 'loading…'; $('srcBadge').className = 'badge';
+  const r = await fetch(`/api/klines?symbol=${symbol}&interval=${interval}&limit=300`).then(r => r.json());
+  candles.setData(r.candles);
+  const closes = r.candles.map(c => c.close);
+  [['ma7', 7], ['ma25', 25], ['ma99', 99]].forEach(([k, p]) => {
+    maSeries[k].setData(r.candles.map((c, i) => ({ time: c.time, value: closes.slice(0, i + 1).slice(-p).reduce((a, b) => a + b, 0) / Math.min(p, i + 1) })).slice(p - 1));
+  });
+  chart.timeScale().fitContent();
+  $('srcBadge').textContent = `币安${r.env === 'testnet' ? '测试网' : ''} REST · ${symbol} ${interval}`;
+  $('srcBadge').className = 'badge ok';
+  analyze();
+}
+
+priceLines.forEach(l => candles.removePriceLine(l)); priceLines = [];
+
+async function analyze() {
+  priceLines.forEach(l => { try { candles.removePriceLine(l); } catch {} });
+  const symbol = $('symbol').value, interval = $('interval').value;
+  const a = await fetch(`/api/analyze?symbol=${symbol}&interval=${interval}`).then(r => r.json());
+  window.__a = a;
+
+  const s = a.structure;
+  $('structure').innerHTML = `
+    <div class="kv"><span>结构</span><b class="${s.trend === '多头' ? 'up' : s.trend === '空头' ? 'down' : 'neutral'}">${s.trend}</b></div>
+    <div class="kv"><span>现价</span><b>${a.price}</b></div>
+    <div class="kv"><span>SMA20 / SMA50</span><b>${s.sma20} / ${s.sma50}</b></div>
+    <div class="kv"><span>RSI14</span><b>${s.rsi14}（${s.rsiZone}）</b></div>
+    <div class="kv"><span>ATR14</span><b>${s.atr14}</b></div>
+    ${a.signal ? `<div class="kv"><span>策略信号</span><b>${a.signal.action}（${a.signal.confidence}）</b></div>` : ''}`;
+
+  $('mtf').innerHTML = `<table><tr><th>周期</th><th>结构</th><th>SMA20</th><th>SMA50</th></tr>` +
+    a.resonance.timeframes.map(m => `<tr><td>${m.tf}</td><td class="${m.label === '多头' ? 'up' : m.label === '空头' ? 'down' : 'neutral'}">${m.label}</td><td>${m.sma20 ?? '—'}</td><td>${m.sma50 ?? '—'}</td></tr>`).join('') +
+    `</table><div class="kv" style="margin-top:6px"><span>共振判定</span><b class="${a.resonance.verdict === '多头共振' ? 'up' : a.resonance.verdict === '空头共振' ? 'down' : 'neutral'}">${a.resonance.verdict}（${a.resonance.score}）</b></div>`;
+
+  $('sr').innerHTML = '<table><tr><th>类型</th><th>价位</th><th>触及</th><th>距离</th></tr>' +
+    a.levels.supportResistance.map(l => `<tr><td>${l.kind === 'R' ? '压力' : l.kind === 'S' ? '支撑' : 'S/R'}</td><td>${l.price}</td><td>${l.touches}</td><td>${l.distPct > 0 ? '+' : ''}${l.distPct}%</td></tr>`).join('') + '</table>';
+  a.levels.supportResistance.forEach(l => {
+    priceLines.push(candles.createPriceLine({ price: l.price, color: l.kind === 'R' ? '#ef535088' : l.kind === 'S' ? '#26a69a88' : '#fbbf2466', lineWidth: 1, lineStyle: 2, title: `${l.kind}${l.price}` }));
+  });
+
+  const f = a.levels.fib;
+  $('fib').innerHTML = f ? `<div class="kv"><span>摆动区间</span><b>${f.swingLow} – ${f.swingHigh}（${f.direction === 'up' ? '上升摆动' : '下降摆动'}）</b></div>` +
+    '<table>' + f.levels.map(l => `<tr><td>${(l.ratio * 100).toFixed(1)}%</td><td>${l.price}</td></tr>`).join('') + '</table>' : '—';
+  if (f) f.levels.forEach(l => { if (l.ratio === 0.618) priceLines.push(candles.createPriceLine({ price: l.price, color: '#c084fc66', lineWidth: 1, lineStyle: 3, title: `Fib 0.618` })); });
+
+  const p = a.plan;
+  $('plan').innerHTML = `<span class="pill ${p.bias.includes('多') ? 'long' : p.bias.includes('空') ? 'short' : 'flat'}">${p.bias}</span>` +
+    `<div class="kv"><span>${p.zone ? '观察区' : p.range ? '参考区间' : '要点'}</span><b>${p.zone ? p.zone[0] + ' – ' + p.zone[1] : p.range ? p.range[0] + ' – ' + p.range[1] : (p.note || '—')}</b></div>` +
+    (p.breakout ? `<div class="kv"><span>突破口</span><b>${p.breakout}</b></div>` : '') +
+    (p.breakdown ? `<div class="kv"><span>破位参考</span><b>${p.breakdown}</b></div>` : '') +
+    (p.invalid ? `<div class="kv"><span>作废位</span><b>${p.invalid}</b></div>` : '') +
+    (p.target ? `<div class="kv"><span>目标参考</span><b>${p.target}</b></div>` : '') +
+    (p.note ? `<div style="color:#8b96ab">${p.note}</div>` : '');
+}
+
+async function report() {
+  const symbol = $('symbol').value, interval = $('interval').value;
+  $('report').textContent = 'AI 分析师生成中…（DeepSeek 实时调用）';
+  const r = await fetch(`/api/report?symbol=${symbol}&interval=${interval}`).then(r => r.json());
+  $('report').textContent = r.narrative + `\n\n[来源: ${r.source}]`;
+}
+
+async function agent() {
+  try {
+    const a = await fetch('/api/agent').then(r => r.json());
+    $('agentBadge').textContent = `${a.mode} · ${a.env} · ${a.killSwitch ? '急停ON' : '运行中'}`;
+    $('agentBadge').className = 'badge ' + (a.killSwitch ? 'warn' : 'ok');
+    $('journal').innerHTML = a.recentJournal.map(j => `<div>[${(j.time || '').slice(11, 19)}] ${j.type} ${j.reason || j.order || ''}</div>`).join('') || '尚无决策记录';
+  } catch { $('journal').textContent = '—'; }
+}
+
+$('analyzeBtn').onclick = analyze;
+$('reportBtn').onclick = report;
+$('symbol').onchange = load;
+$('interval').onchange = load;
+$('stopBtn').onclick = async () => {
+  if (!confirm('确认启用急停？Agent 将拒绝所有新订单。')) return;
+  await fetch('/api/stop', { method: 'POST' });
+  agent();
+};
+
+load();
+agent();
+setInterval(agent, 30000);
+
+// auto demo sequence for the hackathon demo video (?demo=1)
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+const DEMO = new URLSearchParams(location.search).has('demo');
+if (DEMO) {
+  (async () => {
+    await sleepMs(14000);                       // let the first analysis land
+    $('interval').value = '4h'; load();         // switch timeframe live
+    await sleepMs(11000);
+    $('symbol').value = 'ETHUSDT'; load();      // switch symbol live
+    await sleepMs(11000);
+    $('symbol').value = 'BTCUSDT'; $('interval').value = '1h'; load();
+    await sleepMs(8000);
+    report();                                   // regenerate AI report live
+    await sleepMs(14000);
+  })();
+}
+
+// headless verification beacon + auto mode (used by the demo recorder)
+window.addEventListener('error', (e) => {
+  try { fetch('/api/beacon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: Date.now(), pageError: e.message, line: e.lineno, src: (e.filename || '').slice(-40) }) }); } catch {}
+});
+window.addEventListener('unhandledrejection', (e) => {
+  try { fetch('/api/beacon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: Date.now(), promiseError: String(e.reason).slice(0, 200) }) }); } catch {}
+});
+const AUTO = new URLSearchParams(location.search).has('auto');
+if (AUTO) { setTimeout(report, 9000); }
+setTimeout(async () => {
+  let chartN = 0;
+  try { chartN = candles.data().length; } catch {}
+  const ok = {
+    chartBars: chartN,
+    structure: ($('structure').textContent || '').includes('现价'),
+    mtf: ($('mtf').textContent || '').includes('共振'),
+    sr: ($('sr').textContent || '').includes('支撑') || ($('sr').textContent || '').includes('压力'),
+    fib: ($('fib').textContent || '').length > 5,
+    plan: ($('plan').textContent || '').includes('观察') || ($('plan').textContent || '').includes('区间'),
+    report: ($('report').textContent || '').length > 20,
+  };
+  try { await fetch('/api/beacon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: Date.now(), url: location.href, ...ok }) }); } catch {}
+}, DEMO ? 55000 : AUTO ? 20000 : 12000);
+</script>
+</body>
+</html>
